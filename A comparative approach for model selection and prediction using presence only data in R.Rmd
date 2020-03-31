@@ -1,0 +1,535 @@
+---
+title: "Mini-Project"
+author: "Vinayak Chaturvedi, Nitin Sharma, Stavan Anjaria"
+date: "3/22/2020"
+output:   
+  pdf_document: 
+    latex_engine: xelatex
+---
+
+#NOTE : Please put all the required CSV files provided with submission in the same folder as R Source file and appropriately setting up current working directory. All codes written below have been referenced and commented wherever necessary. 
+
+#Importing required packages:
+
+```{r,message=FALSE}
+library(ggplot2); theme_set(theme_light())
+library(dplyr)
+library(readr)
+library(GGally)
+library(leaps)
+library(glmnet)
+library(glmnetUtils)
+library(caret)
+library(fitdistrplus)
+
+```
+# Show the GG PAIRS relations in the data for each feature against target variable.
+```{r}
+set.seed(1)
+landscape_data <- read_csv("Filtered_Landscape.csv", col_types = cols(cellid = col_integer()))
+
+df1 <- landscape_data[, c("bio1","bio2","bio3","bio4","bio5","Freq")]
+ggpairs(df1)
+
+df2 <- landscape_data[, c("bio6","bio7","bio8","bio9","bio10","Freq")]
+ggpairs(df2)
+
+df3 <- landscape_data[, c("bio11","bio12","bio13","bio14","bio15","Freq")]
+ggpairs(df3)
+
+df4 <- landscape_data[, c("bio16","bio17","bio18","bio19","Freq")]
+ggpairs(df4)
+
+```
+
+#Check for the missing values - The data does not have any missing values
+```{r}
+set.seed(1)
+landscape_data <- read_csv("Filtered_Landscape.csv", col_types = cols(cellid = col_integer()))
+dim(landscape_data)
+na.omit(landscape_data)
+dim(landscape_data)
+```
+
+#Method 1 - Subset Selection
+# Read the CSV files to load the landscape datas
+
+#Best Subset Selection with all predictors
+```{r}
+set.seed(1)
+#Load and Split
+landscape_data <- read_csv("Filtered_Landscape.csv", col_types = cols(cellid = col_integer()))
+synthetic_training <- sample.int(nrow(landscape_data), nrow(landscape_data)*0.7)
+#Function for prediction -> returns a product matrix with coeffiecent matrix and variables
+predict.regsubsets <- function(object, newdata, id, ...) {
+    form <- as.formula(object$call[[2]])
+    mat <- model.matrix(form, newdata)
+    coefi <- coef(object, id = id)
+    xvars <- names(coefi)
+    mat[, xvars] %*% coefi
+}
+#Test/Train 
+train = sample(c(TRUE,FALSE), nrow(landscape_data),rep=TRUE)
+test =(! train )
+
+#One regfit applied on training data to observe R2 , CIP ands BIC statistics
+regfit.best = regsubsets(Freq ~  (bio1 + bio2 + bio3 + bio4 + bio5 + bio6 + bio7 + bio8 + bio9 + bio10 + bio11 + bio12 + bio13 + bio14 + bio15 + bio16 + bio17 + bio18 + bio19) , data=landscape_data[train,], nvmax =9)
+summary(regfit.best)
+
+res.sum <- summary(regfit.best)
+
+plot(regfit.best,scale="adjr2")
+plot(regfit.best,scale="Cp")
+plot(regfit.best,scale="bic")
+
+data.frame( Adj.R2 = which.max(res.sum$adjr2), CP = which.min(res.sum$cp), BIC = which.min(res.sum$bic) )
+
+#Crossvalidation with 10 Folds
+
+test.mat = model.matrix(Freq ~ ., data=landscape_data[test,])
+k = 10
+set.seed(1)
+folds = sample(1:k,nrow(landscape_data),replace=TRUE)
+table(folds)
+
+cv.errors=matrix(NA,k,9, dimnames=list(NULL, paste(1:9)))
+for(j in 1:k)
+    {
+        best.fit = regsubsets(Freq ~  (bio1 + bio2 + bio3 + bio4 + bio5 + bio6 + bio7 + bio8 + bio9 + bio10 + bio11 + bio12 + bio13 + bio14 + bio15 + bio16 + bio17 + bio18 + bio19) , data=landscape_data[folds != j,], nvmax = 9)
+
+        for (i in 1:9){
+                pred = predict.regsubsets(best.fit, landscape_data[folds == j, ], id = i)
+                cv.errors[j, i] = mean((landscape_data$Freq[folds == j] - pred)^2)
+        }
+}
+
+#Finding the minimum of the mean crossvalidation for all the folds. We will select the fold with minimum crossvalidation
+
+#will apply the function mean to all the elements of each column
+mean.cv.errors = apply(cv.errors,2,mean)
+
+#  for(s in 1:9)
+#  {
+#   mean.cv.errors[s] = sqrt(mean.cv.errors[s])
+# }
+
+mean.cv.errors
+
+# mean.cv.errors = apply(mean.cv.errors,2,mean)
+ min(mean.cv.errors)
+ coef(regfit.best,8)
+
+
+
+```
+#Output file generation for Best Subset Selection
+```{r}
+set.seed(1)
+pred_data <- read_csv("Predicition_File_With_NA.csv", col_types = cols(cellid = col_integer()))
+#Selection of features according to minimum RMSE
+bio2 <- (pred_data$bio2)
+bio3 <- (pred_data$bio3)
+bio4 <- (pred_data$bio4)
+bio11 <- (pred_data$bio11)
+bio12 <- (pred_data$bio12)
+bio13 <- (pred_data$bio13)
+bio15 <- (pred_data$bio15)
+bio17 <- (pred_data$bio17)
+
+k= 18593
+p = rep(0, k)
+
+for(i in 1:k){
+p[i] = (( 6.258815717) + (0.823008447*bio2[i]) + ((-0.223511728)*bio3[i]) + ((-0.005492539)*bio4[i]) + ((0.008913361)*bio11[i]) + ((-0.002326648) *bio12[i]) + ((0.024166884)*bio13[i]) + ((-0.064339412)*bio15[i])) + ((-0.005329627)*bio17[i])
+}
+
+write.csv(p,'output_subset_best.csv')
+
+
+```
+
+#Now we will generate RMSE on Best Subset selection with Preselected Choice of Variables.
+
+```{r}
+set.seed(1)
+#Load and Split
+landscape_data <- read_csv("Filtered_Landscape.csv", col_types = cols(cellid = col_integer()))
+synthetic_training <- sample.int(nrow(landscape_data), nrow(landscape_data)*0.7)
+#Function for prediction -> returns a product matrix with coeffiecent matrix and variables
+predict.regsubsets <- function(object, newdata, id, ...) {
+    form <- as.formula(object$call[[2]])
+    mat <- model.matrix(form, newdata)
+    coefi <- coef(object, id = id)
+    xvars <- names(coefi)
+    mat[, xvars] %*% coefi
+}
+#Test/Train 
+train = sample(c(TRUE,FALSE), nrow(landscape_data),rep=TRUE)
+test =(! train )
+
+#One regfit applied on training data to observe R2 , CIP ands BIC statistics
+regfit.best = regsubsets(Freq ~ bio1+bio3+bio4+bio7+bio10+bio11+bio12+bio13+bio14+bio15+bio16+bio17, data=landscape_data[train,], nvmax =9)
+summary(regfit.best)
+
+plot(regfit.best,scale="adjr2")
+plot(regfit.best,scale="Cp")
+plot(regfit.best,scale="bic")
+
+res.sum <- summary(regfit.best)
+
+data.frame( Adj.R2 = which.max(res.sum$adjr2), CP = which.min(res.sum$cp), BIC = which.min(res.sum$bic) )
+
+#Crossvalidation with 10 Folds
+
+test.mat = model.matrix(Freq ~ ., data=landscape_data[test,])
+k = 10
+set.seed(1)
+folds = sample(1:k,nrow(landscape_data),replace=TRUE)
+table(folds)
+
+cv.errors=matrix(NA,k,9, dimnames=list(NULL, paste(1:9)))
+for(j in 1:k)
+    {
+        best.fit = regsubsets(Freq ~ bio1+bio3+bio4+bio7+bio10+bio11+bio12+bio13+bio14+bio15+bio16+bio17, data=landscape_data[folds != j,], nvmax = 9)
+
+        for (i in 1:9){
+                pred = predict.regsubsets(best.fit, landscape_data[folds == j, ], id = i)
+                cv.errors[j, i] = mean((landscape_data$Freq[folds == j] - pred)^2)
+        }
+}
+
+#Finding the minimum of the mean crossvalidation for all the folds. We will select the fold with minimum crossvalidation
+
+#will apply the function mean to all the elements of each column
+mean.cv.errors = apply(cv.errors,2,mean)
+ 
+# for(s in 1:9)
+# {
+#   mean.cv.errors[s] = sqrt(mean.cv.errors[s])
+# }
+
+mean.cv.errors
+
+# mean.cv.errors = apply(mean.cv.errors,2,mean)
+ min(mean.cv.errors)
+ coef(regfit.best,9)
+
+
+
+```
+#Output file generation for Best Subset Selection with selected features
+```{r}
+set.seed(1)
+pred_data <- read_csv("Predicition_File_With_NA.csv", col_types = cols(cellid = col_integer()))
+#Selection of features according to minimum RMSE
+
+cell <- (pred_data$cellid)
+bio4 <- (pred_data$bio4)
+bio7 <- (pred_data$bio7)
+bio10 <- (pred_data$bio10)
+bio11 <- (pred_data$bio11)
+bio12 <- (pred_data$bio12)
+bio13 <- (pred_data$bio13)
+bio15 <- (pred_data$bio15)
+bio16 <- (pred_data$bio16)
+bio17 <- (pred_data$bio17)
+
+k= 18593
+p = rep(0, k)
+
+for(i in 1:k){
+p[i] = (( -0.499945947) + (0.024147477*bio4[i]) + ((0.472774845)*bio7[i]) + ((-1.515206858)*bio10[i]) + ((1.529516791)*bio11[i]) + ((-0.004799631) *bio12[i]) + ((0.024379429)*bio13[i]) + ((-0.124948261)*bio15[i])) + ((0.011395407)*bio16[i]) + ((-0.009882414)*bio17[i])
+}
+write.table(cbind(cell,p), file="output_subset_best_manual.csv",row.names=F,col.names=c('cellid','Frequecy'))
+# write.csv(p,'output_subset_best_manual.csv')
+
+#Note we applied text to columns in EXCEL before submitting the file.
+```
+
+#Forward  Subset Selection
+```{r}
+
+set.seed(1)
+#Load and Split
+landscape_data <- read_csv("Filtered_Landscape.csv", col_types = cols(cellid = col_integer()))
+synthetic_training <- sample.int(nrow(landscape_data), nrow(landscape_data)*0.7)
+#Function for prediction -> returns a product matrix with coeffiecent matrix and variables
+predict.regsubsets <- function(object, newdata, id, ...) {
+    form <- as.formula(object$call[[2]])
+    mat <- model.matrix(form, newdata)
+    coefi <- coef(object, id = id)
+    xvars <- names(coefi)
+    mat[, xvars] %*% coefi
+}
+#Test/Train 
+train = sample(c(TRUE,FALSE), nrow(landscape_data),rep=TRUE)
+test =(! train )
+
+#One regfit applied on training data to observe R2 , CIP ands BIC statistics
+regfit.fwd = regsubsets(Freq ~ ( .- cellid -long -lat), data=landscape_data[train,], nvmax =9, method = "forward")
+summary(regfit.fwd)
+
+plot(regfit.best,scale="adjr2")
+plot(regfit.best,scale="Cp")
+plot(regfit.best,scale="bic")
+
+res.sum <- summary(regfit.fwd)
+
+data.frame( Adj.R2 = which.max(res.sum$adjr2), CP = which.min(res.sum$cp), BIC = which.min(res.sum$bic) )
+
+#Crossvalidation with 10 Folds
+
+test.mat = model.matrix(Freq ~ ( .- cellid -long -lat), data=landscape_data[test,])
+k = 10
+set.seed(1)
+folds = sample(1:k,nrow(landscape_data),replace=TRUE)
+table(folds)
+
+cv.errors=matrix(NA,k,9, dimnames=list(NULL, paste(1:9)))
+for(j in 1:k)
+    {
+        best.fit = regsubsets(Freq ~ ( .- cellid -long -lat), data=landscape_data[folds != j,], nvmax = 9, method= "forward")
+
+        for (i in 1:9){
+                pred = predict.regsubsets(best.fit, landscape_data[folds == j, ], id = i)
+                cv.errors[j, i] = mean((landscape_data$Freq[folds == j] - pred)^2)
+        }
+}
+
+#Finding the minimum of the mean crossvalidation for all the folds. We will select the fold with minimum crossvalidation
+
+#will apply the function mean to all the elements of each column
+mean.cv.errors = apply(cv.errors,2,mean)
+ 
+for(s in 1:9)
+{
+  mean.cv.errors[s] = sqrt(mean.cv.errors[s])
+ }
+
+mean.cv.errors
+
+# mean.cv.errors = apply(mean.cv.errors,2,mean)
+ min(mean.cv.errors)
+ coef(regfit.fwd,9)
+
+
+
+```
+
+#Output file generation for Best Subset Selection with forward selection
+```{r}
+set.seed(1)
+pred_data <- read_csv("Predicition_File_With_NA.csv", col_types = cols(cellid = col_integer()))
+#Selection of features according to minimum RMSE
+
+bio2 <- (pred_data$bio2)
+bio3 <- (pred_data$bio3)
+bio4 <- (pred_data$bio4)
+bio8 <- (pred_data$bio8)
+bio9 <- (pred_data$bio9)
+bio11 <- (pred_data$bio11)
+bio12 <- (pred_data$bio12)
+bio16 <- (pred_data$bio16)
+bio19 <- (pred_data$bio19)
+
+k= 18593
+p = rep(0, k)
+
+for(i in 1:k){
+p[i] = (( 6.463885810) + (0.945673410*bio2[i]) + ((-0.265721229)*bio3[i]) + ((-0.006591618)*bio4[i]) + ((-0.006596061)*bio8[i]) + ((-0.013475631) *bio9[i]) + (( 0.006254202)*bio16[i]) + ((0.005673095 )*bio19[i])) + ((0.027243506)*bio11[i]) + ((-0.003993875)*bio12[i])
+}
+
+write.csv(p,'output_subset_forward.csv')
+
+
+```
+
+#Backward Subset Selection
+```{r}
+
+set.seed(1)
+#Load and Split
+landscape_data <- read_csv("Filtered_Landscape.csv", col_types = cols(cellid = col_integer()))
+synthetic_training <- sample.int(nrow(landscape_data), nrow(landscape_data)*0.7)
+#Function for prediction -> returns a product matrix with coeffiecent matrix and variables
+predict.regsubsets <- function(object, newdata, id, ...) {
+    form <- as.formula(object$call[[2]])
+    mat <- model.matrix(form, newdata)
+    coefi <- coef(object, id = id)
+    xvars <- names(coefi)
+    mat[, xvars] %*% coefi
+}
+#Test/Train 
+train = sample(c(TRUE,FALSE), nrow(landscape_data),rep=TRUE)
+test =(! train )
+
+#One regfit applied on training data to observe R2 , CIP ands BIC statistics
+regfit.bwd = regsubsets(Freq ~ ( .- cellid -long -lat), data=landscape_data[train,], nvmax =9, method = "backward")
+summary(regfit.bwd)
+
+plot(regfit.best,scale="adjr2")
+plot(regfit.best,scale="Cp")
+plot(regfit.best,scale="bic")
+
+res.sum <- summary(regfit.fwd)
+
+data.frame( Adj.R2 = which.max(res.sum$adjr2), CP = which.min(res.sum$cp), BIC = which.min(res.sum$bic) )
+
+#Crossvalidation with 10 Folds
+
+test.mat = model.matrix(Freq ~ ( .- cellid -long -lat), data=landscape_data[test,])
+k = 10
+set.seed(1)
+folds = sample(1:k,nrow(landscape_data),replace=TRUE)
+table(folds)
+
+cv.errors=matrix(NA,k,9, dimnames=list(NULL, paste(1:9)))
+for(j in 1:k)
+    {
+        best.fit = regsubsets(Freq ~ ( .- cellid -long -lat), data=landscape_data[folds != j,], nvmax = 9, method= "backward")
+
+        for (i in 1:9){
+                pred = predict.regsubsets(best.fit, landscape_data[folds == j, ], id = i)
+                cv.errors[j, i] = mean((landscape_data$Freq[folds == j] - pred)^2)
+        }
+}
+
+#Finding the minimum of the mean crossvalidation for all the folds. We will select the fold with minimum crossvalidation
+
+#will apply the function mean to all the elements of each column
+mean.cv.errors = apply(cv.errors,2,mean)
+  
+ for(s in 1:9)
+ {
+  mean.cv.errors[s] = sqrt(mean.cv.errors[s])
+}
+
+mean.cv.errors
+
+# mean.cv.errors = apply(mean.cv.errors,2,mean)
+ min(mean.cv.errors)
+ coef(regfit.bwd,9)
+
+
+
+```
+
+#Output file generation for Best Subset Selection with backward selection
+```{r}
+
+set.seed(1)
+pred_data <- read_csv("Predicition_File_With_NA.csv", col_types = cols(cellid = col_integer()))
+#Selection of features according to minimum RMSE
+
+bio2 <- (pred_data$bio2)
+bio3 <- (pred_data$bio3)
+bio4 <- (pred_data$bio4)
+bio5 <- (pred_data$bio8)
+
+bio11 <- (pred_data$bio11)
+bio12 <- (pred_data$bio12)
+bio13 <- (pred_data$bio13)
+bio15 <- (pred_data$bio15)
+bio17 <- (pred_data$bio17)
+
+k= 18593
+p = rep(0, k)
+
+for(i in 1:k){
+p[i] = ((10.679261964) + (1.431099016*bio2[i]) + ((-0.413539599)*bio3[i]) + ((0.005069954)*bio4[i]) + ((-0.528954318)*bio5[i]) + ((0.590784967) *bio11[i]) + ((-0.003114373)*bio12[i]) + ((0.026044944 )*bio13[i])) + ((-0.057879331)*bio15[i]) + ((-0.001619122)*bio17[i])
+}
+
+write.csv(p,'output_subset_backward.csv')
+
+
+```
+
+#Lasso Method Implementation
+```{r}
+
+set.seed(1)
+#Load and Split
+landscape_data <- read_csv("Filtered_Landscape.csv", col_types = cols(cellid = col_integer()))
+synthetic_training <- sample.int(nrow(landscape_data), nrow(landscape_data)*0.7)
+#Function for prediction -> returns a product matrix with coeffiecent matrix and variables
+predict.regsubsets <- function(object, newdata, id, ...) {
+    form <- as.formula(object$call[[2]])
+    mat <- model.matrix(form, newdata)
+    coefi <- coef(object, id = id)
+    xvars <- names(coefi)
+    mat[, xvars] %*% coefi
+}
+#Test/Train 
+train = sample(c(TRUE,FALSE), nrow(landscape_data),rep=TRUE)
+test =(! train )
+
+lassocalc <- cv.glmnet(Freq ~  (bio1 + bio2 + bio3 + bio4 + bio5 + bio6 + bio7 + bio8 + bio9 + bio10 + bio11 + bio12 + bio13 + bio14 + bio15 + bio16 + bio17 + bio18 + bio19), alpha = 1, data = landscape_data[train,], nfolds = 10)
+lasso.pred <- predict(lassocalc, newdata = landscape_data[test,], s = lassocalc$lambda.min)
+cat("Lambda value :", lassocalc$lambda.min, "\n")
+cat("Root Mean Square Error:", sqrt(mean((lasso.pred - landscape_data[test,]$Freq)^2)))
+```
+#Cross validation approach to find RMSE for various polynomial fit. 
+```{r}
+set.seed(1)
+# Train the model
+model1 <- train(Freq ~ poly((bio1+bio3+bio10+bio11+bio12+bio13+bio14+bio16+bio17)), data = landscape_data, method = "lm",
+               trControl = train.control)
+
+model2 <- train((Freq) ~ log((bio1+bio3+bio10+bio11+bio12+bio13+bio14+bio16+bio17)), data = landscape_data, method = "lm",
+               trControl = train.control)
+
+model3 <- train(Freq ~ (bio1+bio3+bio5+bio6+bio10+bio11+bio17+bio19) + I((bio1+bio3+bio5+bio6+bio10+bio11+bio17+bio19)^2) + I((bio1+bio3+bio5+bio6+bio10+bio11+bio17+bio19)^3), data = landscape_data, method = "lm",
+               trControl = train.control)
+
+# Summarize the results
+print(model1)
+print(model2)
+print(model3)
+
+```
+
+
+#Likelihood algorithm applied to presence only data Implementation From (https://besjournals.onlinelibrary.wiley.com/doi/pdf/10.1111/j.2041-210X.2011.00182.x)  and density plot analysis
+```{r}
+set.seed(1)
+pred_data <- read_csv("miniproject_synthetic_train.csv", col_types = cols(cellid = col_integer()))
+cellid <- (pred_data$cellid)
+Freq <- (pred_data$freq)
+
+
+
+c <- rnorm(Freq,0,1) # simulate a covariate
+lpsi<- -1 -1*(c) # define the linear predictor
+# occurrence probability
+psi<-exp(lpsi)⁄(1+exp(lpsi))
+# generate presence-absence data
+y<-rbinom(3402,1,psi)
+# keep the presence-only data
+data<- sample(Freq[y==1],100)
+# define the neg log-likelihood
+lik<-function(parm){
+beta0<-parm [1]
+beta1<-parm [2]
+gridpsi<-
+exp(beta0+beta1*z)⁄(1+exp(beta0+beta1*z))
+datapsi<-
+exp(beta0 + beta1*data)⁄(1+exp(beta0+
+beta1*data))
+-1*sum(log(datapsi⁄(sum(gridpsi))))
+}
+# minimize it
+out<-nlm(lik,c(0,0),hessian=TRUE)
+# produce the estimate
+out$estimate
+
+
+# Now we fit  distribution to the method we implement. ] https://cran.r-project.org/web/packages/fitdistrplus/vignettes/paper2JSS.pdf
+ descdist(pred_data$freq, boot = 1000)
+  fw <- fitdist(pred_data$freq, "weibull")
+  fg <- fitdist(pred_data$freq, "gamma")
+ fln <- fitdist(pred_data$freq, "lnorm")
+ summary(fw)
+# Lets Plot the density graph
+  
+ denscomp(list(fw, fln, fg))
+```
