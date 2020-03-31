@@ -6,3 +6,5 @@ Authors: Vinayak Chaturvedi, Nitin Sharma and Stavan Anjaria
 University of New Hampshire, Durham
 Course: CS850 Machine Learning 
  
+ 
+Summary -  This project is a comparison of some machine learning models that were used to predict plant species frequency in the New England Region, United States. 
